@@ -1625,26 +1625,39 @@ impl ClangItemParser for Item {
             decl
         };
 
+        let current_module = ctx.current_module().into();
+        let relevant_parent_id = parent_id.unwrap_or(current_module);
+
         if valid_decl {
-            if let Some(partial) = ctx
+            if let Some(_) = ctx
                 .currently_parsed_types()
                 .iter()
                 .find(|ty| *ty.decl() == declaration_to_look_for)
             {
                 debug!("Avoiding recursion parsing type: {:?}", ty);
-                // Unchecked because we haven't finished this type yet.
-                return Ok(partial.id().as_type_id_unchecked());
+                // Make an opaque type.
+                let ty = Opaque::from_clang_ty(&ty, ctx);
+                ctx.add_item(
+                    Item::new(
+                        id,
+                        comment,
+                        annotations,
+                        relevant_parent_id,
+                        ItemKind::Type(ty),
+                    ),
+                    None,
+                    Some(location),
+                );
+                return Ok(id.as_type_id_unchecked());
             }
         }
 
-        let current_module = ctx.current_module().into();
         let partial_ty = PartialType::new(declaration_to_look_for, id);
         if valid_decl {
             ctx.begin_parsing(partial_ty);
         }
 
         let result = Type::from_clang_ty(id, ty, location, parent_id, ctx);
-        let relevant_parent_id = parent_id.unwrap_or(current_module);
         let ret = match result {
             Ok(ParseResult::AlreadyResolved(ty)) => {
                 Ok(ty.as_type_id_unchecked())
