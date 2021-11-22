@@ -88,6 +88,24 @@ pub mod attributes {
         }
     }
 
+    pub fn defined_type_opaque() -> TokenStream {
+        quote! {
+            #[bindgen_defined_type_opaque]
+        }
+    }
+
+    pub fn ret_type_opaque() -> TokenStream {
+        quote! {
+            #[bindgen_ret_type_opaque]
+        }
+    }
+
+    pub fn arg_type_opaque(arg_name: &Ident) -> TokenStream {
+        quote! {
+            #[bindgen_arg_type_opaque(#arg_name)]
+        }
+    }
+
     pub fn is_pure_virtual() -> TokenStream {
         quote! {
             #[bindgen_pure_virtual]

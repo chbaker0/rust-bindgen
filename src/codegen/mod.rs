@@ -831,19 +831,18 @@ impl CodeGenerator for Type {
                     item.used_template_params(ctx);
 
                 let is_opaque = item.is_opaque(ctx, &());
-                let (inner_rust_type, inner_annotations) = if is_opaque {
+                let inner_rust_type = if is_opaque {
                     outer_params = vec![];
-                    (self.to_opaque(ctx, item), RustTyAnnotation::None)
+                    self.to_opaque(ctx, item)
                 } else {
                     // Its possible that we have better layout information than
                     // the inner type does, so fall back to an opaque blob based
                     // on our layout if converting the inner item fails.
-                    let (mut inner_ty, inner_annotations) = inner_item
+                    let mut inner_ty = inner_item
                         .try_to_rust_ty_or_opaque(ctx, &())
-                        .map(|ty| ty.to_outer_type())
-                        .unwrap_or_else(|_| (self.to_opaque(ctx, item), RustTyAnnotation::None));
+                        .unwrap_or_else(|_| self.to_opaque(ctx, item));
                     inner_ty.append_implicit_template_params(ctx, inner_item);
-                    (inner_ty, inner_annotations)
+                    inner_ty
                 };
 
                 {
@@ -876,18 +875,13 @@ impl CodeGenerator for Type {
                 } else {
                     quote! {}
                 };
+                let (inner_rust_type, inner_annotations) = inner_rust_type.to_outer_type();
                 tokens.append_all(match inner_annotations {
-                    RustTyAnnotation::None | RustTyAnnotation::Reference
-                        if has_unused_template_args =>
-                    {
-                        attributes::discards_template_param()
-                    }
-                    RustTyAnnotation::None | RustTyAnnotation::Reference => {
-                        quote! {}
-                    }
-                    RustTyAnnotation::HasUnusedTemplateArgs => {
-                        attributes::discards_template_param()
-                    }
+                    RustTyAnnotation::HasUnusedTemplateArgs =>
+                        attributes::discards_template_param(),
+                    _ if has_unused_template_args =>
+                        attributes::discards_template_param(),
+                    _ => quote! {},
                 });
 
                 let alias_style = if ctx.options().type_alias.matches(&name) {
@@ -3397,9 +3391,9 @@ trait ToOpaque: TryToOpaque {
         &self,
         ctx: &BindgenContext,
         extra: &Self::Extra,
-    ) -> proc_macro2::TokenStream {
+    ) -> RustTy {
         let layout = self.get_layout(ctx, extra);
-        helpers::blob(ctx, layout)
+        RustTy::new_opaque(helpers::blob(ctx, layout))
     }
 }
 
@@ -3497,7 +3491,7 @@ where
         extra: &E,
     ) -> RustTy {
         self.try_to_rust_ty(ctx, extra)
-            .unwrap_or_else(|_| self.to_opaque(ctx, extra).into())
+            .unwrap_or_else(|_| self.to_opaque(ctx, extra))
     }
 }
 
@@ -3570,6 +3564,7 @@ impl TryToOpaque for Type {
 enum RustTyAnnotation {
     None,
     Reference,
+    Opaque,
     HasUnusedTemplateArgs,
 }
 
@@ -3589,6 +3584,13 @@ impl RustTy {
         Self {
             ts,
             annotation: RustTyAnnotation::None,
+        }
+    }
+
+    fn new_opaque(ts: proc_macro2::TokenStream) -> Self {
+        Self {
+            ts,
+            annotation: RustTyAnnotation::Opaque
         }
     }
 
@@ -3645,6 +3647,16 @@ impl RustTy {
         } else {
             Err(error::Error::ReferenceButCouldNotRecord)
         }
+    }
+}
+
+impl AppendImplicitTemplateParams for RustTy {
+    fn append_implicit_template_params(
+        &mut self,
+        ctx: &BindgenContext,
+        item: &Item,
+    ) {
+        self.ts.append_implicit_template_params(ctx, item)
     }
 }
 
@@ -4779,6 +4791,7 @@ pub mod utils {
             (ts, match annotations {
                 super::RustTyAnnotation::None => quote! {},
                 super::RustTyAnnotation::Reference => attributes::ret_type_reference(),
+                super::RustTyAnnotation::Opaque => attributes::ret_type_opaque(),
                 super::RustTyAnnotation::HasUnusedTemplateArgs => attributes::unused_template_param_in_arg_or_return(),
             })
         }
@@ -4848,6 +4861,7 @@ pub mod utils {
                 let arg_attr = match arg_details.annotation {
                     RustTyAnnotation::None => quote! {},
                     RustTyAnnotation::Reference => attributes::arg_type_reference(&arg_name),
+                    RustTyAnnotation::Opaque => attributes::arg_type_opaque(&arg_name),
                     RustTyAnnotation::HasUnusedTemplateArgs => attributes::unused_template_param_in_arg_or_return(),
                 };
 
