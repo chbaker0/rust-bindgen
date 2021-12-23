@@ -4,6 +4,7 @@ use super::analysis::Sizedness;
 use super::annotations::Annotations;
 use super::context::{BindgenContext, FunctionId, ItemId, TypeId, VarId};
 use super::dot::DotAttributes;
+use super::function::Visibility;
 use super::item::{IsOpaque, Item};
 use super::layout::Layout;
 use super::template::TemplateParameters;
@@ -1043,7 +1044,7 @@ pub struct CompInfo {
     /// }
     ///
     /// static Foo::Bar const = {3};
-    inner_types: Vec<TypeId>,
+    inner_types: Vec<(TypeId,Visibility)>,
 
     /// Set of static constants declared inside this class.
     inner_vars: Vec<VarId>,
@@ -1425,7 +1426,9 @@ impl CompInfo {
                     if ctx.resolve_item_fallible(inner).is_some() {
                         let inner = inner.expect_type_id(ctx);
 
-                        ci.inner_types.push(inner);
+                        let access_specifier = cur.access_specifier();
+                        let access_specifier = Visibility::from(access_specifier);
+                        ci.inner_types.push((inner, access_specifier));
 
                         // A declaration of an union or a struct without name
                         // could also be an unnamed field, unfortunately.
@@ -1619,7 +1622,7 @@ impl CompInfo {
 
     /// Get the set of types that were declared within this compound type
     /// (e.g. nested class definitions).
-    pub fn inner_types(&self) -> &[TypeId] {
+    pub fn inner_types(&self) -> &[(TypeId,Visibility)] {
         &self.inner_types
     }
 
@@ -1846,7 +1849,7 @@ impl Trace for CompInfo {
         }
 
         for ty in self.inner_types() {
-            tracer.visit_kind(ty.into(), EdgeKind::InnerType);
+            tracer.visit_kind(ty.0.into(), EdgeKind::InnerType);
         }
 
         for &var in self.inner_vars() {

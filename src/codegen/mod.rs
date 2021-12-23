@@ -31,7 +31,7 @@ use crate::ir::derive::{
 };
 use crate::ir::dot;
 use crate::ir::enum_ty::{Enum, EnumVariant, EnumVariantValue};
-use crate::ir::function::{Abi, Function, FunctionKind, FunctionSig, Linkage};
+use crate::ir::function::{Abi, Function, FunctionKind, FunctionSig, Linkage, Visibility};
 use crate::ir::int::IntKind;
 use crate::ir::item::{IsOpaque, Item, ItemCanonicalName, ItemCanonicalPath};
 use crate::ir::item_kind::ItemKind;
@@ -430,6 +430,7 @@ trait CodeGenerator {
         &self,
         ctx: &BindgenContext,
         result: &mut CodegenResult<'a>,
+        visibility: Option<Visibility>,
         extra: &Self::Extra,
     ) -> Self::Return;
 }
@@ -473,7 +474,8 @@ impl CodeGenerator for Item {
         &self,
         ctx: &BindgenContext,
         result: &mut CodegenResult<'a>,
-        _extra: &(),
+        visibility: Option<Visibility>,
+        extra: &(),
     ) {
         debug!("<Item as CodeGenerator>::codegen: self = {:?}", self);
         if !self.process_before_codegen(ctx, result) {
@@ -482,16 +484,17 @@ impl CodeGenerator for Item {
 
         match *self.kind() {
             ItemKind::Module(ref module) => {
-                module.codegen(ctx, result, self);
+                module.codegen(ctx, result, None, self);
             }
             ItemKind::Function(ref fun) => {
-                fun.codegen(ctx, result, self);
+                fun.codegen(ctx, result, None, self);
             }
             ItemKind::Var(ref var) => {
-                var.codegen(ctx, result, self);
+                var.codegen(ctx, result, None, self);
             }
             ItemKind::Type(ref ty) => {
-                ty.codegen(ctx, result, self);
+                ty.codegen(ctx, result, visibility,self,
+                );
             }
         }
     }
@@ -505,6 +508,7 @@ impl CodeGenerator for Module {
         &self,
         ctx: &BindgenContext,
         result: &mut CodegenResult<'a>,
+        _visibility: Option<Visibility>,
         item: &Item,
     ) {
         debug!("<Module as CodeGenerator>::codegen: item = {:?}", item);
@@ -514,7 +518,7 @@ impl CodeGenerator for Module {
             for child in self.children() {
                 if ctx.codegen_items().contains(child) {
                     *found_any = true;
-                    ctx.resolve_item(*child).codegen(ctx, result, &());
+                    ctx.resolve_item(*child).codegen(ctx, result, None, &());
                 }
             }
 
@@ -597,6 +601,7 @@ impl CodeGenerator for Var {
         &self,
         ctx: &BindgenContext,
         result: &mut CodegenResult<'a>,
+        _visibility: Option<Visibility>,
         item: &Item,
     ) {
         use crate::ir::var::VarType;
@@ -734,6 +739,7 @@ impl CodeGenerator for Type {
         &self,
         ctx: &BindgenContext,
         result: &mut CodegenResult<'a>,
+        visibility: Option<Visibility>,
         item: &Item,
     ) {
         debug!("<Type as CodeGenerator>::codegen: item = {:?}", item);
@@ -760,7 +766,7 @@ impl CodeGenerator for Type {
                 return;
             }
             TypeKind::TemplateInstantiation(ref inst) => {
-                inst.codegen(ctx, result, item)
+                inst.codegen(ctx, result, None, item)
             }
             TypeKind::BlockPointer(inner) => {
                 if !ctx.options().generate_block {
@@ -796,7 +802,7 @@ impl CodeGenerator for Type {
                 result.push(tokens);
                 result.saw_block();
             }
-            TypeKind::Comp(ref ci) => ci.codegen(ctx, result, item),
+            TypeKind::Comp(ref ci) => ci.codegen(ctx, result, visibility, item),
             TypeKind::TemplateAlias(inner, _) | TypeKind::Alias(inner) => {
                 let inner_item =
                     inner.into_resolver().through_type_refs().resolve(ctx);
@@ -1019,12 +1025,12 @@ impl CodeGenerator for Type {
 
                 result.push(tokens);
             }
-            TypeKind::Enum(ref ei) => ei.codegen(ctx, result, item),
+            TypeKind::Enum(ref ei) => ei.codegen(ctx, result, None, item),
             TypeKind::ObjCId | TypeKind::ObjCSel => {
                 result.saw_objc();
             }
             TypeKind::ObjCInterface(ref interface) => {
-                interface.codegen(ctx, result, item)
+                interface.codegen(ctx, result, None, item)
             }
             ref u @ TypeKind::UnresolvedTypeRef(..) => {
                 unreachable!("Should have been resolved after parsing {:?}!", u)
@@ -1063,6 +1069,7 @@ impl<'a> CodeGenerator for Vtable<'a> {
         &self,
         ctx: &BindgenContext,
         result: &mut CodegenResult<'b>,
+        _visibility: Option<Visibility>,
         item: &Item,
     ) {
         assert_eq!(item.id(), self.item_id);
@@ -1108,6 +1115,7 @@ impl CodeGenerator for TemplateInstantiation {
         &self,
         ctx: &BindgenContext,
         result: &mut CodegenResult<'a>,
+        _visibility: Option<Visibility>,
         item: &Item,
     ) {
         debug_assert!(item.is_enabled_for_codegen(ctx));
@@ -1730,6 +1738,7 @@ impl CodeGenerator for CompInfo {
         &self,
         ctx: &BindgenContext,
         result: &mut CodegenResult<'a>,
+        visibility: Option<Visibility>,
         item: &Item,
     ) {
         debug!("<CompInfo as CodeGenerator>::codegen: item = {:?}", item);
@@ -1769,7 +1778,7 @@ impl CodeGenerator for CompInfo {
             if item.has_vtable_ptr(ctx) {
                 let vtable =
                     Vtable::new(item.id(), self.methods(), self.base_members());
-                vtable.codegen(ctx, result, item);
+                vtable.codegen(ctx, result, None, item);
 
                 let vtable_type = vtable
                     .try_to_rust_ty(ctx, &())
@@ -1994,6 +2003,9 @@ impl CodeGenerator for CompInfo {
         if unused_template_params {
             attributes.push(attributes::discards_template_param());
         }
+        if let Some(visibility) = visibility {
+            attributes.push(attributes::visibility(visibility));
+        }
 
         if ctx.options().rust_features().repr_align {
             if let Some(explicit) = explicit_align {
@@ -2086,10 +2098,10 @@ impl CodeGenerator for CompInfo {
         //
         // TODO: In the future we might want to be smart, and use nested
         // modules, and whatnot.
-        for ty in self.inner_types() {
+        for (ty, visibility) in self.inner_types() {
             let child_item = ctx.resolve_item(*ty);
             // assert_eq!(child_item.parent_id(), item.id());
-            child_item.codegen(ctx, result, &());
+            child_item.codegen(ctx, result, Some(*visibility), &());
         }
 
         // NOTE: Some unexposed attributes (like alignment attributes) may
@@ -2105,7 +2117,7 @@ impl CodeGenerator for CompInfo {
         if all_template_params.is_empty() {
             if !is_opaque {
                 for var in self.inner_vars() {
-                    ctx.resolve_item(*var).codegen(ctx, result, &());
+                    ctx.resolve_item(*var).codegen(ctx, result, None, &());
                 }
             }
 
@@ -2383,7 +2395,7 @@ impl MethodCodegen for Method {
             return;
         }
         let function = function_item.expect_function();
-        let times_seen = function.codegen(ctx, result, &function_item);
+        let times_seen = function.codegen(ctx, result, None, &function_item);
         let times_seen = match times_seen {
             Some(seen) => seen,
             None => return,
@@ -2939,6 +2951,7 @@ impl CodeGenerator for Enum {
         &self,
         ctx: &BindgenContext,
         result: &mut CodegenResult<'a>,
+        _visibility: Option<Visibility>,
         item: &Item,
     ) {
         debug!("<Enum as CodeGenerator>::codegen: item = {:?}", item);
@@ -3978,6 +3991,7 @@ impl CodeGenerator for Function {
         &self,
         ctx: &BindgenContext,
         result: &mut CodegenResult<'a>,
+        _visibility: Option<Visibility>,
         item: &Item,
     ) -> Self::Return {
         debug!("<Function as CodeGenerator>::codegen: item = {:?}", item);
@@ -4195,6 +4209,7 @@ impl CodeGenerator for ObjCInterface {
         &self,
         ctx: &BindgenContext,
         result: &mut CodegenResult<'a>,
+        _visibility: Option<Visibility>,
         item: &Item,
     ) {
         debug_assert!(item.is_enabled_for_codegen(ctx));
@@ -4431,7 +4446,8 @@ pub(crate) fn codegen(
         context.resolve_item(context.root_module()).codegen(
             context,
             &mut result,
-            &(),
+            None,
+            &()
         );
 
         if let Some(ref lib_name) = context.options().dynamic_library_name {
