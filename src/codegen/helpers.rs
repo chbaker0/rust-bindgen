@@ -122,8 +122,9 @@ pub mod attributes {
     pub fn layout(layout: &Layout) -> TokenStream {
         let sz = layout.size;
         let align = layout.align;
+        let packed = layout.packed;
         quote! {
-            #[bindgen_layout_(#sz, #align)]
+            #[bindgen_layout_(#sz, #align, #packed)]
         }
     }
 
