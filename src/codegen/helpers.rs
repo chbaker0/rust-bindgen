@@ -6,7 +6,7 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::TokenStreamExt;
 
 pub mod attributes {
-    use crate::ir::{comp::SpecialMemberKind, function::Visibility};
+    use crate::ir::{comp::SpecialMemberKind, function::Visibility, layout::Layout};
     use proc_macro2::{Ident, Span, TokenStream};
     use std::str::FromStr;
 
@@ -116,6 +116,14 @@ pub mod attributes {
     pub fn discards_template_param() -> TokenStream {
         quote! {
             #[bindgen_unused_template_param]
+        }
+    }
+
+    pub fn layout(layout: &Layout) -> TokenStream {
+        let sz = layout.size;
+        let align = layout.align;
+        quote! {
+            #[bindgen_layout_(#sz, #align)]
         }
     }
 
