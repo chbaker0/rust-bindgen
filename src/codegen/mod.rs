@@ -4898,7 +4898,7 @@ pub mod utils {
                     semantic_annotation.ret_type_rvalue_reference()
                 }
                 super::RustTyAnnotation::HasUnusedTemplateArgs | super::RustTyAnnotation::Opaque => {
-                    semantic_annotation.unused_template_param_in_arg_or_return()
+                    semantic_annotation.incomprehensible_param_in_arg_or_return()
                 }
             };
             (
@@ -4982,7 +4982,7 @@ pub mod utils {
                         semantic_annotation.arg_type_rvalue_reference(&arg_name)
                     }
                     RustTyAnnotation::HasUnusedTemplateArgs | RustTyAnnotation::Opaque => {
-                        semantic_annotation.unused_template_param_in_arg_or_return()
+                        semantic_annotation.incomprehensible_param_in_arg_or_return()
                     }
                 };
 
